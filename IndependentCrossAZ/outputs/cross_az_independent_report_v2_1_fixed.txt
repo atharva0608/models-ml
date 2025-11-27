@@ -1,0 +1,116 @@
+MODEL 3: INDEPENDENT CROSS-AZ CAPACITY ANALYZER v2.1 (FIXED)
+================================================================================
+
+VERSION HISTORY:
+  v2.0: Initial independent version (FLAWED - stability metrics inflated scores)
+  v2.1: FIXED CALIBRATION - stability metrics now correctly reduce risk
+
+PRODUCTION READINESS: YES
+
+FIX APPLIED:
+  ✓ Inverted stability metrics (coherence, synchronization)
+  ✓ High volatility coherence → LOW risk (was: HIGH risk)
+  ✓ High price synchronization → LOW risk (was: HIGH risk)
+  ✓ Reweighted: stress/compression get higher weight (70% vs 50%)
+  ✓ Adjusted thresholds: Low <20 (was <30), Moderate 20-40 (was 30-50)
+
+INDEPENDENCE:
+  ✓ Does NOT depend on Model 1 (price predictions)
+  ✓ Does NOT depend on Model 3.1 (anomaly risk scores)
+  ✓ Analyzes raw spot price data across all AZs
+  ✓ Produces independent regional capacity risk scores
+  ✓ Can validate other models OR stand alone
+
+METHODOLOGY:
+  Analyzes: All 3 AZs in ap-south-1
+  Instance Type: c5.large
+  AZs: aps1-az1, aps1-az2, aps1-az3
+
+CROSS-AZ FEATURES (FIXED FORMULA):
+  1. Synchronized Stress (35% weight) - INCREASED
+     - % of AZs simultaneously stressed
+
+  2. Compression Agreement (25% weight) - INCREASED
+     - % of AZs showing discount compression
+
+  3. Absolute Compression (15% weight) - INCREASED
+     - Average compression magnitude
+
+  4. Volatility INSTABILITY (10% weight) - FIXED
+     - INVERTED: 100 - coherence (low coherence = HIGH risk)
+
+  5. Price DIVERGENCE (10% weight) - FIXED
+     - INVERTED: 100 - synchronization (low sync = HIGH risk)
+
+  6. Deviation Coherence (5% weight) - DECREASED
+     - Multiple AZs deviating from baseline
+
+RISK SCORE FORMULA (v2.1 - FIXED):
+  regional_risk = (
+      sync_stress * 0.35 +           # Direct stress (↑ from 0.25)
+      compression_agree * 0.25 +     # Compression (↑ from 0.20)
+      absolute_compression * 0.15 +  # Magnitude (↑ from 0.10)
+      volatility_INSTABILITY * 0.10 + # FIXED: 100 - coherence
+      price_DIVERGENCE * 0.10 +       # FIXED: 100 - sync
+      deviation_cohere * 0.05         # Reduced from 0.15
+  ) + event_boost (up to +10)
+
+OLD FORMULA (v2.0 - WRONG):
+  # This incorrectly treated stability as risk!
+  regional_risk = sync_stress*0.25 + compression*0.20 + 
+                  volatility_coherence*0.15 + price_sync*0.15 + ...
+                  ^^^ HIGH coherence added to risk (WRONG!)
+
+PERFORMANCE (v2.1):
+  Mean Regional Risk: 10.4/100
+  Median: 8.4/100
+  Max: 35.2/100
+  P95: 18.8/100
+
+RISK DISTRIBUTION (v2.1):
+  Low (<20): 265 days (97.1%)
+  Moderate (20-40): 8 days
+  High (40-60): 0 days
+  Critical (>60): 0 days
+
+REGIONAL PATTERNS:
+  Avg Synchronized Stress: 0.6%
+  Avg Compression Agreement: 0.0%
+  Avg Volatility Coherence: 94.2%
+  Avg Price Synchronization: 69.8%
+  Avg Stressed AZs: 0.02 / 3
+
+BASELINE (per AZ, from 2023-24):
+  aps1-az1: 54.9% ± 6.3% (P5=43.5%, P95=65.5%)
+  aps1-az2: 54.9% ± 8.0% (P5=40.0%, P95=65.8%)
+  aps1-az3: 56.8% ± 5.7% (P5=48.0%, P95=68.0%)
+
+KEY INSIGHTS (v2.1):
+  • Low sync stress + low compression = Safe for Spot ✅
+  • High coherence + high sync = Stability (LOW risk) ✅
+  • High sync stress = Regional capacity crisis ⚠️
+  • High compression agreement = Regional tightening ⚠️
+  • Low coherence = AZ instability (moderate risk) ⚠️
+  • Low sync = AZ divergence (investigate) 🔍
+
+PRODUCTION USE:
+  Standalone: Use regional_risk as primary signal
+  Ensemble: Combine with Model 1 & 3.1 for robustness
+  Validation: Filter false positives from other models
+
+  Decision Thresholds (v2.1):
+    < 20: USE_SPOT (low regional risk)
+    20-40: USE_SPOT_WITH_MONITORING (moderate)
+    40-60: CONSIDER_ON_DEMAND (high regional risk)
+    > 60: MIGRATE_TO_ON_DEMAND (critical regional stress)
+
+COMPARISON vs v2.0:
+  v2.0 Mean Risk: 36.6/100 (inflated by stability metrics)
+  v2.1 Mean Risk: 10.4/100 (correctly calibrated)
+
+  Expected v2.1 behavior for stable pool:
+    - Mean risk: 10-20/100 (LOW - reflecting actual stability)
+    - High-risk days: <5% (only genuine regional events)
+    - Discrimination: Clear separation between stable/stressed periods
+
+Generated: 2025-11-10 15:29:21

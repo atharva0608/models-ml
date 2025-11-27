@@ -1,0 +1,27 @@
+COMPLETE BACKTEST REPORT
+============================================================
+
+Pool: c5.large @ aps1-az1
+Region: ap-south-1
+
+BACKTEST SETUP:
+  Training: 2023-2024
+  Testing: 2025 (Jan-Sep)
+  Method: Walk-forward (day-by-day)
+  Days tested: 272
+
+PREDICTION PERFORMANCE:
+  MAE: $0.000273
+  MAPE: 0.88%
+
+RISK ASSESSMENT:
+  Avg: 16.7/100
+  Max: 56.1/100
+  High risk days: 0
+
+VALIDATION:
+  No data leakage
+  Walk-forward backtest
+  Real-world simulation
+
+Generated: 2025-11-09 00:31:04
