@@ -41,7 +41,11 @@ from tqdm.auto import tqdm
 from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor, IsolationForest
 from sklearn.linear_model import ElasticNet
 from sklearn.preprocessing import StandardScaler, RobustScaler
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.metrics import (
+    mean_absolute_error, mean_squared_error, r2_score,
+    precision_score, recall_score, f1_score, fbeta_score,
+    roc_auc_score, average_precision_score, roc_curve, precision_recall_curve
+)
 
 # Visualization
 import matplotlib.pyplot as plt
@@ -541,22 +545,134 @@ class Backtester:
 
         backtest_df = pd.DataFrame(predictions)
 
-        # Calculate metrics
+        # Calculate regression metrics
         mae = backtest_df['error'].mean()
         rmse = np.sqrt((backtest_df['error']**2).mean())
         mape = backtest_df['error_pct'].mean()
+        r2 = 1 - (backtest_df['error']**2).sum() / ((backtest_df['actual_ratio'] - backtest_df['actual_ratio'].mean())**2).sum()
+
+        # Calculate classification metrics (price increase detection)
+        # Define threshold: 2% price increase is significant
+        price_increase_threshold = 0.02
+
+        # Create binary labels
+        backtest_df['actual_increase'] = (
+            (backtest_df['actual_ratio'] - backtest_df['predicted_ratio']) > price_increase_threshold
+        ).astype(int)
+
+        backtest_df['predicted_increase'] = (
+            (backtest_df['predicted_ratio'] - backtest_df['actual_ratio'].shift(1)) > price_increase_threshold
+        ).astype(int)
+
+        # Calculate prediction confidence (probability-like score)
+        backtest_df['confidence'] = np.abs(
+            backtest_df['predicted_ratio'] - backtest_df['actual_ratio'].shift(1)
+        ) / price_increase_threshold
+        backtest_df['confidence'] = backtest_df['confidence'].clip(0, 1)
+
+        # Remove first row (no previous value for shift)
+        classification_df = backtest_df.dropna().copy()
+
+        if len(classification_df) > 0 and classification_df['actual_increase'].sum() > 0:
+            # Calculate classification metrics
+            try:
+                precision = precision_score(
+                    classification_df['actual_increase'],
+                    classification_df['predicted_increase'],
+                    zero_division=0
+                )
+                recall = recall_score(
+                    classification_df['actual_increase'],
+                    classification_df['predicted_increase'],
+                    zero_division=0
+                )
+                f1 = f1_score(
+                    classification_df['actual_increase'],
+                    classification_df['predicted_increase'],
+                    zero_division=0
+                )
+                f2 = fbeta_score(
+                    classification_df['actual_increase'],
+                    classification_df['predicted_increase'],
+                    beta=2.0,
+                    zero_division=0
+                )
+
+                # ROC-AUC and PR-AUC using confidence scores
+                if len(np.unique(classification_df['actual_increase'])) > 1:
+                    roc_auc = roc_auc_score(
+                        classification_df['actual_increase'],
+                        classification_df['confidence']
+                    )
+                    pr_auc = average_precision_score(
+                        classification_df['actual_increase'],
+                        classification_df['confidence']
+                    )
+                else:
+                    roc_auc = 0.0
+                    pr_auc = 0.0
+
+                classification_metrics = {
+                    'precision': precision,
+                    'recall': recall,
+                    'f1_score': f1,
+                    'f2_score': f2,
+                    'roc_auc': roc_auc,
+                    'pr_auc': pr_auc
+                }
+            except Exception as e:
+                print(f"Warning: Could not calculate classification metrics: {e}")
+                classification_metrics = {
+                    'precision': 0.0,
+                    'recall': 0.0,
+                    'f1_score': 0.0,
+                    'f2_score': 0.0,
+                    'roc_auc': 0.0,
+                    'pr_auc': 0.0
+                }
+        else:
+            classification_metrics = {
+                'precision': 0.0,
+                'recall': 0.0,
+                'f1_score': 0.0,
+                'f2_score': 0.0,
+                'roc_auc': 0.0,
+                'pr_auc': 0.0
+            }
 
         print(f"\n" + "-"*80)
         print("BACKTEST RESULTS")
         print("-"*80)
         print(f"Days predicted: {len(backtest_df)}")
-        print(f"MAE: {mae:.6f}")
-        print(f"RMSE: {rmse:.6f}")
-        print(f"MAPE: {mape:.2f}%")
-        print(f"Best day: {backtest_df['error'].min():.6f}")
-        print(f"Worst day: {backtest_df['error'].max():.6f}")
-        print(f"Avg predicted ratio: {backtest_df['predicted_ratio'].mean():.4f}")
-        print(f"Avg actual ratio: {backtest_df['actual_ratio'].mean():.4f}")
+
+        print(f"\nRegression Metrics:")
+        print(f"  MAE: {mae:.6f}")
+        print(f"  RMSE: {rmse:.6f}")
+        print(f"  MAPE: {mape:.2f}%")
+        print(f"  R²: {r2:.4f}")
+        print(f"  Best day: {backtest_df['error'].min():.6f}")
+        print(f"  Worst day: {backtest_df['error'].max():.6f}")
+
+        print(f"\nClassification Metrics (Price Increase Detection):")
+        print(f"  Precision: {classification_metrics['precision']:.4f}")
+        print(f"  Recall: {classification_metrics['recall']:.4f}")
+        print(f"  F1-Score: {classification_metrics['f1_score']:.4f}")
+        print(f"  F2-Score: {classification_metrics['f2_score']:.4f}")
+        print(f"  ROC-AUC: {classification_metrics['roc_auc']:.4f}")
+        print(f"  PR-AUC: {classification_metrics['pr_auc']:.4f}")
+
+        print(f"\nPrice Ratios:")
+        print(f"  Avg predicted: {backtest_df['predicted_ratio'].mean():.4f}")
+        print(f"  Avg actual: {backtest_df['actual_ratio'].mean():.4f}")
+
+        # Store metrics in backtest_df for later use
+        backtest_df.attrs['classification_metrics'] = classification_metrics
+        backtest_df.attrs['regression_metrics'] = {
+            'mae': mae,
+            'rmse': rmse,
+            'mape': mape,
+            'r2': r2
+        }
 
         return backtest_df
 
@@ -786,10 +902,21 @@ class Visualizer:
         ax10 = fig.add_subplot(gs[5, 2])
         ax10.axis('off')
 
-        mae = backtest_df['error'].mean()
-        rmse = np.sqrt((backtest_df['error']**2).mean())
-        mape = backtest_df['error_pct'].mean()
-        r2 = 1 - (backtest_df['error']**2).sum() / ((backtest_df['actual_ratio'] - backtest_df['actual_ratio'].mean())**2).sum()
+        # Get metrics from backtest_df attributes
+        regression_metrics = backtest_df.attrs.get('regression_metrics', {})
+        classification_metrics = backtest_df.attrs.get('classification_metrics', {})
+
+        mae = regression_metrics.get('mae', backtest_df['error'].mean())
+        rmse = regression_metrics.get('rmse', np.sqrt((backtest_df['error']**2).mean()))
+        mape = regression_metrics.get('mape', backtest_df['error_pct'].mean())
+        r2 = regression_metrics.get('r2', 1 - (backtest_df['error']**2).sum() / ((backtest_df['actual_ratio'] - backtest_df['actual_ratio'].mean())**2).sum())
+
+        precision = classification_metrics.get('precision', 0.0)
+        recall = classification_metrics.get('recall', 0.0)
+        f1 = classification_metrics.get('f1_score', 0.0)
+        f2 = classification_metrics.get('f2_score', 0.0)
+        roc_auc = classification_metrics.get('roc_auc', 0.0)
+        pr_auc = classification_metrics.get('pr_auc', 0.0)
 
         summary = f"""
 PERFORMANCE SUMMARY
@@ -798,25 +925,30 @@ Dataset:
   Pool: {metadata['pool_instance']} @ {metadata['pool_az']}
   Days predicted: {len(backtest_df)}
 
-Prediction Metrics:
+Regression Metrics:
   MAE: {mae:.6f}
   RMSE: {rmse:.6f}
   MAPE: {mape:.2f}%
   R²: {r2:.4f}
-  Best day: {backtest_df['error'].min():.6f}
-  Worst day: {backtest_df['error'].max():.6f}
+
+Classification Metrics:
+  Precision: {precision:.3f}
+  Recall: {recall:.3f}
+  F1-Score: {f1:.3f}
+  F2-Score: {f2:.3f}
+  ROC-AUC: {roc_auc:.3f}
+  PR-AUC: {pr_auc:.3f}
 
 Risk Assessment:
-  Avg risk: {backtest_df['avg_risk'].mean():.1f}/100
-  Max risk: {backtest_df['avg_risk'].max():.1f}/100
-  High risk days: {(backtest_df['avg_risk'] > config.RISK_HIGH).sum()}
-  Moderate risk: {((backtest_df['avg_risk'] >= config.RISK_MODERATE) & (backtest_df['avg_risk'] < config.RISK_HIGH)).sum()}
-  Low risk days: {(backtest_df['avg_risk'] < config.RISK_LOW).sum()}
+  Avg: {backtest_df['avg_risk'].mean():.1f}/100
+  Max: {backtest_df['avg_risk'].max():.1f}/100
+  High: {(backtest_df['avg_risk'] > config.RISK_HIGH).sum()}
+  Moderate: {((backtest_df['avg_risk'] >= config.RISK_MODERATE) & (backtest_df['avg_risk'] < config.RISK_HIGH)).sum()}
+  Low: {(backtest_df['avg_risk'] < config.RISK_LOW).sum()}
 
 Validation:
   ✓ Walk-forward backtest
   ✓ No data leakage
-  ✓ Day-by-day prediction
 """
 
         ax10.text(0.05, 0.5, summary, fontsize=9, family='monospace',
@@ -882,10 +1014,21 @@ def main():
     # 9. Generate report
     report_path = config.OUTPUT_DIR / 'training_report.txt'
 
-    mae = backtest_df['error'].mean()
-    rmse = np.sqrt((backtest_df['error']**2).mean())
-    mape = backtest_df['error_pct'].mean()
-    r2 = 1 - (backtest_df['error']**2).sum() / ((backtest_df['actual_ratio'] - backtest_df['actual_ratio'].mean())**2).sum()
+    # Get metrics from backtest_df
+    regression_metrics = backtest_df.attrs.get('regression_metrics', {})
+    classification_metrics = backtest_df.attrs.get('classification_metrics', {})
+
+    mae = regression_metrics.get('mae', backtest_df['error'].mean())
+    rmse = regression_metrics.get('rmse', np.sqrt((backtest_df['error']**2).mean()))
+    mape = regression_metrics.get('mape', backtest_df['error_pct'].mean())
+    r2 = regression_metrics.get('r2', 1 - (backtest_df['error']**2).sum() / ((backtest_df['actual_ratio'] - backtest_df['actual_ratio'].mean())**2).sum())
+
+    precision = classification_metrics.get('precision', 0.0)
+    recall = classification_metrics.get('recall', 0.0)
+    f1 = classification_metrics.get('f1_score', 0.0)
+    f2 = classification_metrics.get('f2_score', 0.0)
+    roc_auc = classification_metrics.get('roc_auc', 0.0)
+    pr_auc = classification_metrics.get('pr_auc', 0.0)
 
     report = f"""
 {'='*80}
@@ -931,15 +1074,22 @@ BACKTEST RESULTS
 Days predicted: {len(backtest_df)}
 Date range: {backtest_df['date'].min()} to {backtest_df['date'].max()}
 
-Prediction Performance:
+REGRESSION METRICS:
   MAE: {mae:.6f}
   RMSE: {rmse:.6f}
   MAPE: {mape:.2f}%
   R²: {r2:.4f}
-
   Best day: {backtest_df['error'].min():.6f}
   Worst day: {backtest_df['error'].max():.6f}
   Median error: {backtest_df['error'].median():.6f}
+
+CLASSIFICATION METRICS (Price Increase Detection >2%):
+  Precision: {precision:.4f}
+  Recall: {recall:.4f}
+  F1-Score: {f1:.4f}
+  F2-Score: {f2:.4f}
+  ROC-AUC: {roc_auc:.4f}
+  PR-AUC: {pr_auc:.4f}
 
 Price Ratio:
   Predicted avg: {backtest_df['predicted_ratio'].mean():.4f}
@@ -987,10 +1137,19 @@ END OF REPORT
     print("\n" + "="*80)
     print("TRAINING COMPLETE")
     print("="*80)
-    print(f"\nPerformance Summary:")
+    print(f"\nRegression Metrics:")
     print(f"  MAE: {mae:.6f}")
+    print(f"  RMSE: {rmse:.6f}")
     print(f"  MAPE: {mape:.2f}%")
     print(f"  R²: {r2:.4f}")
+    print(f"\nClassification Metrics:")
+    print(f"  Precision: {precision:.4f}")
+    print(f"  Recall: {recall:.4f}")
+    print(f"  F1-Score: {f1:.4f}")
+    print(f"  F2-Score: {f2:.4f}")
+    print(f"  ROC-AUC: {roc_auc:.4f}")
+    print(f"  PR-AUC: {pr_auc:.4f}")
+    print(f"\nRisk Assessment:")
     print(f"  Avg Risk: {backtest_df['avg_risk'].mean():.1f}/100")
     print(f"\nAll outputs saved to: {config.OUTPUT_DIR}")
     print("\n" + "="*80)
