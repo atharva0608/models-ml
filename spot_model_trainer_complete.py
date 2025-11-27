@@ -259,9 +259,13 @@ class FeatureEngineer:
             df[f'price_change_{period}h'] = df['SpotPrice'].pct_change(period) * 100
             df[f'ratio_change_{period}h'] = df['price_ratio'].pct_change(period) * 100
 
-        # Volatility
-        df['volatility_24h'] = df['SpotPrice'].rolling(24, min_periods=1).std() / df['SpotPrice']
-        df['volatility_168h'] = df['SpotPrice'].rolling(168, min_periods=24).std() / df['SpotPrice']
+        # Volatility (with safe division)
+        rolling_std_24h = df['SpotPrice'].rolling(24, min_periods=1).std()
+        rolling_std_168h = df['SpotPrice'].rolling(168, min_periods=24).std()
+
+        # Avoid division by zero - add small epsilon
+        df['volatility_24h'] = rolling_std_24h / (df['SpotPrice'] + 1e-10)
+        df['volatility_168h'] = rolling_std_168h / (df['SpotPrice'] + 1e-10)
 
         # Temporal features
         print("Creating temporal features...")
@@ -279,11 +283,26 @@ class FeatureEngineer:
             raw=False
         )
 
-        # Fill NaN values
+        # Handle infinite and extreme values
+        print("Cleaning infinite and extreme values...")
         feature_cols = [col for col in df.columns if col not in
                        ['timestamp', 'SpotPrice', 'OnDemandPrice', 'InstanceType', 'AZ', 'Region']]
 
-        df[feature_cols] = df[feature_cols].fillna(method='bfill').fillna(0)
+        # Replace inf with NaN
+        df[feature_cols] = df[feature_cols].replace([np.inf, -np.inf], np.nan)
+
+        # Clip extreme values (beyond 10 standard deviations from mean)
+        for col in feature_cols:
+            if df[col].dtype in ['float64', 'float32']:
+                col_mean = df[col].mean()
+                col_std = df[col].std()
+                if col_std > 0:
+                    lower_bound = col_mean - 10 * col_std
+                    upper_bound = col_mean + 10 * col_std
+                    df[col] = df[col].clip(lower_bound, upper_bound)
+
+        # Fill remaining NaN values
+        df[feature_cols] = df[feature_cols].bfill().ffill().fillna(0)
 
         # Get feature list
         feature_list = [col for col in df.columns if any([
