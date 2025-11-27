@@ -34,7 +34,11 @@ from tqdm.auto import tqdm
 from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
 from sklearn.linear_model import ElasticNet, Ridge
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.metrics import (
+    mean_absolute_error, mean_squared_error, r2_score,
+    precision_score, recall_score, f1_score, fbeta_score,
+    roc_auc_score, average_precision_score
+)
 
 # Visualization
 import matplotlib.pyplot as plt
@@ -594,18 +598,61 @@ class CrossRegionTester:
 
         y_pred = self.model.predict(X_test)
 
-        # Calculate metrics
+        # Calculate regression metrics
         mae = mean_absolute_error(y_true, y_pred)
         rmse = np.sqrt(mean_squared_error(y_true, y_pred))
         mape = np.mean(np.abs((y_true - y_pred) / y_true)) * 100
         r2 = r2_score(y_true, y_pred)
 
+        # Calculate classification metrics (price increase detection)
+        price_increase_threshold = 0.02
+
+        # Create binary labels for classification
+        y_true_shifted = np.roll(y_true, 1)
+        y_true_increase = ((y_true - y_true_shifted) > price_increase_threshold).astype(int)[1:]
+        y_pred_shifted = np.roll(y_pred, 1)
+        y_pred_increase = ((y_pred - y_pred_shifted) > price_increase_threshold).astype(int)[1:]
+
+        # Calculate confidence scores
+        confidence = np.abs(y_pred[1:] - y_true_shifted[1:]) / price_increase_threshold
+        confidence = np.clip(confidence, 0, 1)
+
+        # Calculate classification metrics
+        if len(y_true_increase) > 0 and np.sum(y_true_increase) > 0:
+            try:
+                precision = precision_score(y_true_increase, y_pred_increase, zero_division=0)
+                recall = recall_score(y_true_increase, y_pred_increase, zero_division=0)
+                f1 = f1_score(y_true_increase, y_pred_increase, zero_division=0)
+                f2 = fbeta_score(y_true_increase, y_pred_increase, beta=2.0, zero_division=0)
+
+                if len(np.unique(y_true_increase)) > 1:
+                    roc_auc = roc_auc_score(y_true_increase, confidence)
+                    pr_auc = average_precision_score(y_true_increase, confidence)
+                else:
+                    roc_auc = 0.0
+                    pr_auc = 0.0
+            except Exception as e:
+                print(f"Warning: Could not calculate classification metrics: {e}")
+                precision = recall = f1 = f2 = roc_auc = pr_auc = 0.0
+        else:
+            precision = recall = f1 = f2 = roc_auc = pr_auc = 0.0
+
         print(f"\nTest Results (2024):")
         print(f"  Samples: {len(y_true):,}")
+
+        print(f"\nRegression Metrics:")
         print(f"  MAE: {mae:.6f}")
         print(f"  RMSE: {rmse:.6f}")
         print(f"  MAPE: {mape:.2f}%")
         print(f"  R²: {r2:.4f}")
+
+        print(f"\nClassification Metrics (Price Increase Detection >2%):")
+        print(f"  Precision: {precision:.4f}")
+        print(f"  Recall: {recall:.4f}")
+        print(f"  F1-Score: {f1:.4f}")
+        print(f"  F2-Score: {f2:.4f}")
+        print(f"  ROC-AUC: {roc_auc:.4f}")
+        print(f"  PR-AUC: {pr_auc:.4f}")
 
         # Create results dataframe
         results_df = pd.DataFrame({
@@ -621,6 +668,12 @@ class CrossRegionTester:
             'rmse': rmse,
             'mape': mape,
             'r2': r2,
+            'precision': precision,
+            'recall': recall,
+            'f1_score': f1,
+            'f2_score': f2,
+            'roc_auc': roc_auc,
+            'pr_auc': pr_auc,
             'samples': len(y_true)
         }
 
@@ -777,10 +830,18 @@ CROSS-REGION INSIGHTS:
 
 TEST PERFORMANCE (2024):
   Samples: {metrics['samples']:,} hours
+
+Regression Metrics:
   MAE: {metrics['mae']:.6f}
   RMSE: {metrics['rmse']:.6f}
   MAPE: {metrics['mape']:.2f}%
   R²: {metrics['r2']:.4f}
+
+Classification Metrics:
+  Precision: {metrics.get('precision', 0):.3f}
+  Recall: {metrics.get('recall', 0):.3f}
+  F2-Score: {metrics.get('f2_score', 0):.3f}
+  ROC-AUC: {metrics.get('roc_auc', 0):.3f}
 
 KEY FINDINGS:
   ✓ Cross-region features improve prediction accuracy
@@ -904,10 +965,20 @@ CROSS-REGION CORRELATIONS:
 TEST PERFORMANCE (2024):
 {'-'*80}
 Samples: {metrics['samples']:,}
+
+REGRESSION METRICS:
 MAE: {metrics['mae']:.6f}
 RMSE: {metrics['rmse']:.6f}
 MAPE: {metrics['mape']:.2f}%
 R²: {metrics['r2']:.4f}
+
+CLASSIFICATION METRICS (Price Increase Detection >2%):
+Precision: {metrics.get('precision', 0):.4f}
+Recall: {metrics.get('recall', 0):.4f}
+F1-Score: {metrics.get('f1_score', 0):.4f}
+F2-Score: {metrics.get('f2_score', 0):.4f}
+ROC-AUC: {metrics.get('roc_auc', 0):.4f}
+PR-AUC: {metrics.get('pr_auc', 0):.4f}
 
 Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 """)
@@ -917,10 +988,15 @@ Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
     print("\n" + "="*80)
     print("CROSS-REGION MODEL COMPLETE")
     print("="*80)
-    print(f"\nTest Performance:")
+    print(f"\nRegression Metrics:")
     print(f"  MAE: {metrics['mae']:.6f}")
     print(f"  MAPE: {metrics['mape']:.2f}%")
     print(f"  R²: {metrics['r2']:.4f}")
+    print(f"\nClassification Metrics:")
+    print(f"  Precision: {metrics.get('precision', 0):.4f}")
+    print(f"  Recall: {metrics.get('recall', 0):.4f}")
+    print(f"  F2-Score: {metrics.get('f2_score', 0):.4f}")
+    print(f"  ROC-AUC: {metrics.get('roc_auc', 0):.4f}")
     print(f"\nOutputs: {config.OUTPUT_DIR}")
     print("="*80)
 
