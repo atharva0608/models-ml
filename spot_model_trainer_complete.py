@@ -354,6 +354,22 @@ class ModelTrainer:
         print(f"Features: {len(feature_cols)}")
         print(f"Target: Next hour price_ratio")
 
+        # Final cleanup: ensure no inf/nan values before scaling
+        print("Final data validation...")
+
+        # Replace inf with large finite values
+        X_train = np.where(np.isinf(X_train), np.nan, X_train)
+
+        # Fill NaN with 0
+        X_train = np.nan_to_num(X_train, nan=0.0, posinf=0.0, neginf=0.0)
+
+        # Verify no inf values remain
+        if not np.all(np.isfinite(X_train)):
+            print("WARNING: Non-finite values detected after cleanup, replacing with 0")
+            X_train = np.nan_to_num(X_train, nan=0.0, posinf=0.0, neginf=0.0)
+
+        print(f"✓ Data validated: {np.isfinite(X_train).all()}")
+
         # Scale features
         X_train_scaled = self.scaler.fit_transform(X_train)
 
@@ -437,6 +453,10 @@ class ModelTrainer:
 
     def predict(self, X):
         """Ensemble prediction"""
+        # Clean input data
+        X = np.where(np.isinf(X), np.nan, X)
+        X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
+
         X_scaled = self.scaler.transform(X)
 
         pred_gb = self.models['gb'].predict(X_scaled)
