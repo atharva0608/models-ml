@@ -56,9 +56,9 @@ plt.rcParams['figure.max_open_warning'] = 0
 class Config:
     """Cross-region model configuration"""
 
-    # Data paths (UPDATE WITH YOUR PATHS)
-    TRAINING_DATA_2023 = '/Users/atharvapudale/Downloads/aws_2023_complete_12months.csv'
-    TEST_DATA_2024 = '/Users/atharvapudale/Downloads/aws_2024_complete_12months.csv'
+    # Data paths (using combined 2023-2024 file)
+    TRAINING_DATA_2023 = '/Users/atharvapudale/Downloads/aws_2023_2024_complete_24months.csv'
+    TEST_DATA_2024 = '/Users/atharvapudale/Downloads/aws_2023_2024_complete_24months.csv'
 
     # Output directories
     SCRIPT_DIR = Path(__file__).parent.absolute() if '__file__' in globals() else Path.cwd()
@@ -158,13 +158,44 @@ class CrossRegionDataLoader:
 
         all_regions = [target_region] + source_regions
 
-        # Load training data (2023)
-        print("\nLoading 2023 training data...")
-        train_df = pd.read_csv(train_path)
-        train_df = CrossRegionDataLoader.standardize_columns(train_df)
+        # Check if same file is used for both train and test
+        same_file = train_path == test_path
 
-        # Filter to regions we care about
-        train_df = train_df[train_df['Region'].isin(all_regions)]
+        if same_file:
+            print("\nLoading combined 2023-2024 data...")
+            combined_df = pd.read_csv(train_path)
+            combined_df = CrossRegionDataLoader.standardize_columns(combined_df)
+
+            # Split by year
+            combined_df['year'] = combined_df['timestamp'].dt.year
+            train_df = combined_df[combined_df['year'] == 2023].copy()
+            test_df = combined_df[combined_df['year'] == 2024].copy()
+
+            print(f"  2023 records: {len(train_df):,}")
+            print(f"  2024 records: {len(test_df):,}")
+
+            # Filter to regions we care about (and show what's available)
+            available_regions = combined_df['Region'].unique()
+            print(f"\n  Available regions in data: {', '.join(sorted(available_regions))}")
+
+            # Filter source regions to only those available in data
+            source_regions = [r for r in source_regions if r in available_regions]
+            all_regions = [target_region] + source_regions
+
+            train_df = train_df[train_df['Region'].isin(all_regions)]
+            test_df = test_df[test_df['Region'].isin(all_regions)]
+        else:
+            # Load training data (2023)
+            print("\nLoading 2023 training data...")
+            train_df = pd.read_csv(train_path)
+            train_df = CrossRegionDataLoader.standardize_columns(train_df)
+            train_df = train_df[train_df['Region'].isin(all_regions)]
+
+            # Load test data (2024)
+            print("\nLoading 2024 test data...")
+            test_df = pd.read_csv(test_path)
+            test_df = CrossRegionDataLoader.standardize_columns(test_df)
+            test_df = test_df[test_df['Region'].isin(all_regions)]
 
         # Select best instance type for target region
         target_train = train_df[train_df['Region'] == target_region]
@@ -180,12 +211,6 @@ class CrossRegionDataLoader:
         print(f"\nTarget Region: {target_region}")
         print(f"Selected Pool: {target_instance} @ {target_az}")
         print(f"  Training records: {len(target_train):,}")
-
-        # Load test data (2024)
-        print("\nLoading 2024 test data...")
-        test_df = pd.read_csv(test_path)
-        test_df = CrossRegionDataLoader.standardize_columns(test_df)
-        test_df = test_df[test_df['Region'].isin(all_regions)]
 
         # Statistics
         train_dates = train_df['timestamp'].dt.date.unique()
